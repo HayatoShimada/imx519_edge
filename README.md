@@ -9,7 +9,7 @@ Arducam IMX519（16MP / AF）で服を撮る、Raspberry Pi 側のコード。85
 
 ## 使う
 
-`https://85pi.taila713c8.ts.net:12443`（tailnet の中だけ）をスマホで開く。
+`https://camera.85-store.com`（tailnet の中だけ）をスマホで開く。直接 `https://85pi.taila713c8.ts.net:12443` でも開ける。
 
 1. 「新しい商品」で入力して「下書きを作って撮影へ」。続きを撮るときは「保留中の下書き」から選ぶ
 2. 「ライブビューに接続」で構図を見て「撮影」。必要なら「カメラ」で先に測光して固定する。画面を閉じるとライブビューは切れる
@@ -41,6 +41,33 @@ git clone https://github.com/HayatoShimada/imx519_edge.git ~/imx519_edge
 - 設定: `~/.config/imx519_edge/config.toml`（例は `deploy/config.example.toml`、全項目は `imx519_edge/config.py`）
 - パンチルトは、I2C を有効にし（`/boot/firmware/config.txt` に `dtparam=i2c_arm=on`、要 sudo と再起動）、
   `i2cdetect -y 1` で 0x40 が見えてから、設定の `[pantilt] enabled = true` にする
+
+## camera.85-store.com の入口（`deploy/camera/`）
+
+85pi の 443 番は tailscale serve（`85pi.taila713c8.ts.net`）が使っているので、85store-cms と同じ形の入口を別に立てる。
+tailnet に「camera」（`tag:camera`）として参加する tailscale のサイドカーと、TLS を終端する Caddy の 2 つ。
+Caddy は tailnet 経由で 85pi の撮影アプリ（`:12443`）に中継し、接続元のアドレスを `X-Camera-Client` で渡す
+（撮影アプリが whois で操作した人の名前を引き、session.json の `operator` に入れる）。
+
+1. Tailscale の管理画面の Access controls に足す（管理者は既存の「すべての端末に入れる」で camera:443 に入れる）
+
+   ```jsonc
+   "tagOwners": { "tag:camera": ["autogroup:admin"] },
+   "hosts": { "85pi": "100.119.159.109" },   // 既にあれば不要
+   "grants": [
+     // camera 端末は 85pi の撮影アプリだけに入れる
+     { "src": ["tag:camera"], "dst": ["85pi"], "ip": ["12443"] },
+   ],
+   ```
+
+2. 認証キーを作る（Settings → Keys → Generate auth key。Reusable: オフ、Pre-approved: オン、Tags: `tag:camera`）
+3. 85pi の `~/imx519_edge/deploy/camera/.env` に `TS_AUTHKEY` と `CLOUDFLARE_API_TOKEN`（85store-cms と同じもの）を書く（`.env.example`）
+4. `cd ~/imx519_edge/deploy/camera && docker compose up -d`
+5. Cloudflare の 85-store.com に `camera` の A レコード（値は camera 端末の tailnet の IPv4。プロキシはオフ）。
+   `docker compose exec tailscale tailscale ip -4` で分かる
+6. Caddy が Let's Encrypt から DNS で証明書を取る。`docker compose logs caddy` で確かめる
+
+Caddy のイメージは、85store-cms が作って 85pi に置いている `85store-cms-caddy:latest`（Cloudflare の DNS のモジュール入り）を使う。
 
 ## コマンドラインで撮る
 

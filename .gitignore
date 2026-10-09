@@ -4,3 +4,6 @@ __pycache__/
 .ruff_cache/
 *.dng
 *.jpg
+
+# camera.85-store.com の入口の秘密情報
+deploy/camera/.env

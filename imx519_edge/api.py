@@ -16,6 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .cms import Cms, CmsError
+from .identity import operator_from, tailscale_whois
 from .manifest import MANIFEST, manifest_digest
 from .pantilt import Presets
 from .service import Busy, EdgeService, NoSpace
@@ -60,7 +61,11 @@ class JobIn(BaseModel):
 
 
 def create_app(
-    service: EdgeService, cms: Cms, presets: Presets | None = None, manage_service: bool = False
+    service: EdgeService,
+    cms: Cms,
+    presets: Presets | None = None,
+    manage_service: bool = False,
+    whois=tailscale_whois,
 ) -> FastAPI:
     """manage_service が True なら、アプリの起動と終了に合わせてカメラのスレッドを動かす。"""
 
@@ -256,7 +261,7 @@ def create_app(
             positions=body.positions,
             note=body.note,
             lighting=body.lighting,
-            operator=request.headers.get("Tailscale-User-Login"),
+            operator=operator_from(request.headers, whois),
         )
         return job.public()
 

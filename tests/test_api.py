@@ -55,7 +55,7 @@ def client(tmp_path):
     service = EdgeService(config, lambda: open_fake_camera(), free_bytes=lambda p: free["bytes"])
     service.start()
     cms = FakeCms()
-    app = create_app(service, cms)
+    app = create_app(service, cms, whois=lambda ip: f"whois-{ip}")
     with TestClient(app) as c:
         c.service, c.cms, c.free = service, cms, free
         wait(lambda: service.state == "idle")
@@ -166,3 +166,16 @@ def test_logs_ping_and_health(client):
     messages = [e["message"] for e in client.get("/api/logs").json()]
     assert "カメラを開きました" in messages
     assert any(m.startswith("測光して固定") for m in messages)
+
+
+def test_operator_from_camera_entry(client):
+    job = client.post(
+        "/api/jobs",
+        json={"cms_product_id": 42, "frames": 1},
+        headers={"X-Camera-Client": "100.64.0.9"},
+    ).json()
+    wait(lambda: client.get(f"/api/jobs/{job['id']}").json()["status"] == "done")
+    session = json.loads(
+        client.get(f"/api/sessions/{job['session_id']}/files/session.json").content
+    )
+    assert session["operator"] == "whois-100.64.0.9"

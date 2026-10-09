@@ -1,0 +1,33 @@
+# camera.85-store.com の TLS を終端して、85pi の撮影アプリに渡す。
+# tailscale serve が tailnet からの 443 番を PROXY プロトコル付きでここ（127.0.0.1:8443）に転送する。
+{
+	auto_https disable_redirects
+	servers 127.0.0.1:8443 {
+		listener_wrappers {
+			proxy_protocol {
+				allow 127.0.0.1/32
+			}
+			tls
+		}
+	}
+}
+
+camera.85-store.com:8443 {
+	bind 127.0.0.1
+	# 証明書は Let's Encrypt から DNS（Cloudflare）で取る（HTTP では外から確認できないため）
+	tls {
+		dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+		resolvers 1.1.1.1
+	}
+	# 85pi の tailscale serve（:12443）へ。camera 端末はタグ付きなので、撮影アプリには利用者の名前が届かない。
+	# 代わりに接続元（スマホの tailnet のアドレス）を X-Camera-Client で渡し、撮影アプリが whois で名前を引く
+	reverse_proxy https://85pi.taila713c8.ts.net:12443 {
+		header_up Host {upstream_hostport}
+		header_up X-Camera-Client {remote_host}
+		header_up -Tailscale-User-Login
+		header_up -Tailscale-User-Name
+		header_up -Tailscale-User-Profile-Pic
+		# ライブビュー（MJPEG）と通知（SSE）を溜めずに流す
+		flush_interval -1
+	}
+}

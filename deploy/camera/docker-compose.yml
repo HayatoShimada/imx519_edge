@@ -1,0 +1,44 @@
+# camera.85-store.com で撮影アプリを開くための入口（85pi の ~/imx519_edge/deploy/camera で docker compose up -d）。
+# 85store-cms と同じ形: tailnet に「camera」（tag:camera）として参加し、443 番を Caddy に渡す。
+# Caddy は TLS を終端し、tailnet 経由で 85pi の撮影アプリ（tailscale serve の :12443）に中継する。
+# camera.85-store.com は camera 端末の tailnet のアドレスを指すので、tailnet の外からは届かない。
+services:
+  tailscale:
+    image: tailscale/tailscale:stable
+    hostname: camera
+    restart: unless-stopped
+    environment:
+      - TS_AUTHKEY=${TS_AUTHKEY}
+      - TS_STATE_DIR=/var/lib/tailscale
+      - TS_SERVE_CONFIG=/config/serve.json
+      - TS_EXTRA_ARGS=--advertise-tags=tag:camera
+      # 中継先（85pi.<tailnet>.ts.net）を名前で引くため、MagicDNS を使う
+      - TS_ACCEPT_DNS=true
+    volumes:
+      - tailscale-state:/var/lib/tailscale
+      - ./tailscale:/config:ro
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    cap_add:
+      - net_admin
+
+  caddy:
+    # Cloudflare の DNS のモジュール入りの Caddy。85store-cms が作って 85pi に置いているイメージを使う
+    # （85pi ではビルドしない。無いときは 85store-cms の deploy.sh で入る）
+    image: 85store-cms-caddy:latest
+    restart: unless-stopped
+    environment:
+      # Cloudflare の API トークン（85-store.com の DNS の編集だけ）。証明書を DNS で取るのに使う
+      - CLOUDFLARE_API_TOKEN=${CLOUDFLARE_API_TOKEN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    network_mode: service:tailscale
+    depends_on:
+      - tailscale
+
+volumes:
+  tailscale-state:
+  caddy-data:
+  caddy-config:
