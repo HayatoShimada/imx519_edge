@@ -1,16 +1,39 @@
 # imx519_edge
 
-Arducam IMX519（16MP / AF）で、合成用のフレームを撮る Raspberry Pi 側のコード。85pi（Raspberry Pi 5）で動かす。
+Arducam IMX519（16MP / AF）で服を撮る、Raspberry Pi 側のコード。85pi（Raspberry Pi 5）で常駐する。
 設計は [super_imx519 の DESIGN.md](https://github.com/HayatoShimada/super_imx519/blob/main/DESIGN.md) にある。
 
-今はコマンドラインで撮れる。カメラとパンチルトを独占する常駐デーモン、Web の撮影アプリ、
-85store-cms との連携、サーバーへの転送は、これから足す（Phase 1）。
+- **カメラデーモン**: Picamera2 とパンチルト（PCA9685）を独占し、ライブビューと撮影ジョブを 1 本ずつ実行する
+- **撮影アプリ**（スマホのブラウザ向け）: 区分・ブランド・品名・カテゴリ・品目を既存の値から選び、85store-cms に「保留」の下書きを作って、その商品で撮る
+- **取り込み用の API**: サーバー（super_imx519）がセッションを取りに来て、sha256 で照合してから消す
 
-## 撮る
+## 使う
 
-露出ブラケット × 連写で撮る。最初に AE / AWB / AF を一度だけ走らせて値を読み、そのあと全部固定して撮る。
-ゲインは 1.0 に固定し、明るさはシャッター時間だけで変える。各フレームを DNG（RAW）・JPEG（ISP 出力）・
-メタデータ JSON で保存し、最後に `session.json`（schema_version 1）を書く。
+`https://85pi.taila713c8.ts.net:12443`（tailnet の中だけ）をスマホで開く。
+
+1. 「新しい商品」で入力して「下書きを作って撮影へ」。続きを撮るときは「保留中の下書き」から選ぶ
+2. ライブビューで構図を見て「撮影」。必要なら「カメラ」で先に測光して固定する
+3. 撮ったセッションは `~/captures/<session_id>/` に置かれ、サーバーが取り込むと消える
+4. 価格・SKU・原価は CMS で入れ、「保留」を外して保存すると Shopify に作られる
+
+CMS に保留の欄が無いあいだ（85store-cms が古いあいだ）は、下書きを作らない。
+
+## 入れる・更新する（85pi）
+
+```sh
+git clone https://github.com/HayatoShimada/imx519_edge.git ~/imx519_edge
+~/imx519_edge/deploy/install.sh     # venv、設定ファイル、systemd のユーザーサービス、tailscale serve
+```
+
+- 更新: `cd ~/imx519_edge && git pull && systemctl --user restart imx519-edge`
+- ログ: `journalctl --user -u imx519-edge -f`
+- 設定: `~/.config/imx519_edge/config.toml`（例は `deploy/config.example.toml`、全項目は `imx519_edge/config.py`）
+- パンチルトは、I2C を有効にし（`/boot/firmware/config.txt` に `dtparam=i2c_arm=on`、要 sudo と再起動）、
+  `i2cdetect -y 1` で 0x40 が見えてから、設定の `[pantilt] enabled = true` にする
+
+## コマンドラインで撮る
+
+カメラを開けるのは 1 プロセスだけなので、先にデーモンを止める（`systemctl --user stop imx519-edge`）。
 
 ```sh
 cd ~/imx519_edge
@@ -27,11 +50,29 @@ python3 -m imx519_edge burst --out ~/captures/test1 --frames 8 --ev -2 0 2
 | `--cms-id` | 85store-cms の商品 ID（session.json の `product` に入る） |
 | `--note` | メモ |
 
-ファイル名は `p{位置}_ev{EV}_{連番}`（例: `p00_ev+0.0_03.dng`）。
+ファイル名は `p{位置}_ev{EV}_{連番}`（例: `p00_ev+0.0_03.dng`）。`session.json` は schema_version 1（`imx519_edge/session.py`）。
+
+## API
+
+| メソッド | パス | 内容 |
+| --- | --- | --- |
+| GET | `/api/status` | 状態、固定値、パンチルト、空き容量、実行中のジョブ |
+| GET | `/api/events` | 状態と進捗（Server-Sent Events） |
+| GET | `/api/preview.mjpg`・`/api/preview.jpg` | ライブビュー |
+| POST | `/api/camera/meter`・`/api/camera/auto` | 測光して固定 / 自動に戻す |
+| PUT | `/api/camera/settings` | 固定値を変える |
+| POST | `/api/pantilt/move`・`/api/pantilt/stop` | 移動（後で full-off）/ 非常停止 |
+| GET・PUT | `/api/pantilt/presets` | 構図のプリセット |
+| GET | `/api/cms/options`・`/api/cms/products`・`/api/cms/products/{id}` | CMS の選択肢・保留中の下書き・商品 1 件 |
+| POST | `/api/cms/products` | 保留の下書きを作る |
+| POST | `/api/jobs` | 撮影（`cms_product_id` 必須） |
+| GET・DELETE | `/api/jobs/{id}` | 進捗 / 中止 |
+| GET | `/api/sessions`・`/api/sessions/{id}/manifest`・`/api/sessions/{id}/files/{name}` | 取り込み用 |
+| DELETE | `/api/sessions/{id}?manifest_sha256=…` | 照合したあとに消す |
 
 ## 開発
 
-カメラの無いマシンでは、`imx519_edge/fake.py` の偽のカメラでテストする。
+カメラ・パンチルト・CMS の無いマシンでは、偽物（`imx519_edge/fake.py`、`pantilt.FakeBus`、テストの `FakeCms`）で試す。
 
 ```sh
 uv run pytest
@@ -42,4 +83,4 @@ uv run ruff check . && uv run ruff format .
 
 - Raspberry Pi OS Trixie（64bit）、Python 3.13
 - Arducam 版の libcamera / rpicam-apps（Raspberry Pi 版の tuning ファイルには `rpi.af` が無く、`LensPosition` が無視される）
-- `picamera2`（Raspberry Pi OS の apt のもの）
+- apt の `python3-picamera2`（numpy・simplejpeg も一緒に入る）と `python3-smbus2`
