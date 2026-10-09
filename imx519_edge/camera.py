@@ -36,26 +36,40 @@ class Metered:
 
 
 class Camera:
-    def __init__(self, picam2, af_auto, af_manual, rotate180: bool = False):
+    def __init__(
+        self,
+        picam2,
+        af_auto,
+        af_manual,
+        af_continuous=None,
+        rotate180: bool = False,
+        preview_size: tuple[int, int] = (640, 480),
+    ):
         self.picam2 = picam2
         self.af_auto, self.af_manual = af_auto, af_manual
+        self.af_continuous = af_continuous if af_continuous is not None else af_auto
         self.rotate180 = rotate180
+        self.preview_size = preview_size
 
     @classmethod
-    def open(cls, rotate180: bool = False) -> "Camera":
+    def open(cls, rotate180: bool = False, preview_size: tuple[int, int] = (640, 480)) -> "Camera":
         from libcamera import Transform, controls
         from picamera2 import Picamera2
 
         picam2 = Picamera2()
         transform = Transform(hflip=1, vflip=1) if rotate180 else Transform()
-        camera = cls(picam2, controls.AfModeEnum.Auto, controls.AfModeEnum.Manual, rotate180)
+        af = controls.AfModeEnum
+        camera = cls(picam2, af.Auto, af.Manual, af.Continuous, rotate180, preview_size)
         camera.start(transform)
         return camera
 
     def start(self, transform=None) -> None:
+        # フル解像度のモードのまま、ライブビュー用の小さな lores ストリームも出す
+        # （撮るたびに設定し直さない）
         picam2 = self.picam2
         config = picam2.create_still_configuration(
             main={"size": picam2.sensor_resolution, "format": "RGB888"},
+            lores={"size": self.preview_size, "format": "YUV420"},
             raw={"size": picam2.sensor_resolution},
             buffer_count=2,
             **({"transform": transform} if transform is not None else {}),
@@ -92,11 +106,35 @@ class Camera:
                 "AwbEnable": False,
                 "ColourGains": metered.colour_gains,
                 "AnalogueGain": 1.0,
+                "ExposureTime": int(min(metered.base_exposure_us, MAX_EXPOSURE_US)),
                 "AfMode": self.af_manual,
                 "LensPosition": metered.lens_position,
                 "NoiseReductionMode": 0,  # Off（ISP の JPEG にだけ効く。RAW には影響しない）
             }
         )
+
+    def unlock(self) -> None:
+        """自動制御に戻す（ライブビューで構図を見るとき）。"""
+        self.picam2.set_controls(
+            {"AeEnable": True, "AwbEnable": True, "AfMode": self.af_continuous}
+        )
+
+    def preview_jpeg(self, quality: int = 70) -> bytes:
+        """lores（YUV420）の 1 フレームを JPEG にする。
+
+        Pi 5 には JPEG のハードウェアのエンコーダが無いので、simplejpeg で作る。
+        """
+        import simplejpeg
+
+        request = self.picam2.capture_request()
+        try:
+            yuv = request.make_array("lores")
+        finally:
+            request.release()
+        w, h = self.preview_size
+        u = yuv[h : h + h // 4].reshape(h // 2, w // 2)
+        v = yuv[h + h // 4 : h * 3 // 2].reshape(h // 2, w // 2)
+        return simplejpeg.encode_jpeg_yuv_planes(yuv[:h, :w], u, v, quality=quality)
 
     def set_exposure(self, exposure_us: int, tol: float = 0.02, max_frames: int = 30) -> None:
         """露光時間を設定し、フレームに反映されるまで読み捨てる（設定は数フレーム遅れて効く）。"""

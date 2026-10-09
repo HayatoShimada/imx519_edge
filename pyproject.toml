@@ -5,12 +5,19 @@ description = "Arducam IMX519 の撮影エッジ（Raspberry Pi 5）"
 readme = "README.md"
 # 85pi は Raspberry Pi OS Trixie の Python 3.13。picamera2 / libcamera は apt のものを使う
 requires-python = ">=3.11"
-dependencies = []
+# numpy・simplejpeg・smbus2 も apt のものを使う（venv は --system-site-packages で作る）
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+]
 
 [dependency-groups]
 dev = [
+    "httpx2>=2.13",
+    "numpy>=2.0",
     "pytest>=8.0",
     "ruff>=0.6",
+    "simplejpeg>=1.7",
 ]
 
 [build-system]

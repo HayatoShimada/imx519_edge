@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>IMX519 撮影</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="bar">
+    <h1>撮影</h1>
+    <div class="chips">
+      <span id="state" class="chip">接続中…</span>
+      <span id="disk" class="chip muted"></span>
+    </div>
+  </header>
+
+  <main>
+    <!-- 画面 1: 商品 -->
+    <section id="view-product" class="view">
+      <p id="hold-warning" class="notice" hidden>
+        CMS に「保留」の欄がまだ無いため、下書きを作れません（CMS の更新待ち）。
+      </p>
+      <div class="tabs" role="tablist">
+        <button type="button" role="tab" data-tab="new" aria-selected="true">新しい商品</button>
+        <button type="button" role="tab" data-tab="held" aria-selected="false">保留中の下書き</button>
+      </div>
+
+      <form id="new-product" class="panel" data-panel="new" autocomplete="off">
+        <fieldset class="field">
+          <legend>区分</legend>
+          <div id="kinds" class="segmented"></div>
+        </fieldset>
+        <label class="field">
+          <span>ブランド</span>
+          <input id="brand" list="brands" placeholder="検索して選ぶ">
+          <datalist id="brands"></datalist>
+          <small id="brand-hint" class="muted"></small>
+        </label>
+        <label class="field">
+          <span>品名</span>
+          <input id="name" required placeholder="例: Italian Velor 3B Jacket">
+        </label>
+        <label class="field">
+          <span>Shopify のカテゴリ</span>
+          <select id="category"><option value="">（選ばない）</option></select>
+        </label>
+        <label class="field">
+          <span>品目</span>
+          <select id="product-type"><option value="">（選ばない）</option></select>
+        </label>
+        <p class="muted small">価格・SKU・原価は、あとで CMS で入れてから「保留」を外します。</p>
+        <button id="create" class="primary" type="submit">下書きを作って撮影へ</button>
+      </form>
+
+      <div class="panel" data-panel="held" hidden>
+        <ul id="held" class="list"></ul>
+        <p id="held-empty" class="muted" hidden>保留中の下書きはありません。</p>
+      </div>
+    </section>
+
+    <!-- 画面 2: 撮影 -->
+    <section id="view-shoot" class="view" hidden>
+      <div class="product-head">
+        <div>
+          <div class="muted small">CMS #<span id="p-id"></span></div>
+          <h2 id="p-title"></h2>
+        </div>
+        <button id="change-product" type="button" class="link">商品を変える</button>
+      </div>
+
+      <div class="live">
+        <img id="live" alt="ライブビュー">
+        <div id="live-note" class="live-note" hidden></div>
+      </div>
+
+      <div id="progress" class="progress" hidden>
+        <div class="progress-bar"><div id="progress-fill"></div></div>
+        <span id="progress-text" class="small"></span>
+      </div>
+
+      <div class="actions">
+        <button id="shoot" class="primary big" type="button">撮影</button>
+        <button id="cancel" class="danger big" type="button" hidden>中止</button>
+      </div>
+
+      <details class="panel">
+        <summary>撮影の設定</summary>
+        <label class="field"><span>EV（空白区切り）</span><input id="ev" inputmode="text"></label>
+        <div class="row">
+          <label class="field"><span>露出ごとの枚数</span><input id="frames" type="number" min="1" max="32"></label>
+          <label class="field"><span>微動の位置</span><input id="positions" type="number" min="1" max="20"></label>
+        </div>
+        <label class="field"><span>メモ</span><input id="note" placeholder="照明の設定など"></label>
+      </details>
+
+      <details class="panel">
+        <summary>カメラ</summary>
+        <p id="locked" class="small muted">自動（AE / AWB / AF）。撮影の最初に測光して固定します。</p>
+        <div class="row">
+          <button id="meter" type="button">測光して固定</button>
+          <button id="auto" type="button">自動に戻す</button>
+        </div>
+        <label class="field">
+          <span>レンズ位置（ディオプター。0 = 無限遠）</span>
+          <div class="row">
+            <input id="lens" type="range" min="0" max="15" step="0.05">
+            <output id="lens-value" class="mono"></output>
+          </div>
+        </label>
+        <label class="field">
+          <span>基準の露光時間（µs、ゲイン 1.0）</span>
+          <input id="exposure" type="number" min="100" step="100">
+        </label>
+        <button id="apply-settings" type="button">固定値を変える</button>
+      </details>
+
+      <details id="pantilt-panel" class="panel">
+        <summary>パンチルト</summary>
+        <p id="pantilt-off" class="small muted">パンチルトは使えません（設定で無効か、I2C が有効になっていません）。</p>
+        <div id="pantilt-on" hidden>
+          <p class="small mono">パン <span id="pan"></span> / チルト <span id="tilt"></span></p>
+          <div class="pad">
+            <button type="button" data-move="0,-10">↑10</button>
+            <button type="button" data-move="0,-1">↑1</button>
+            <button type="button" data-move="-10,0">←10</button>
+            <button type="button" data-move="-1,0">←1</button>
+            <button type="button" data-move="1,0">→1</button>
+            <button type="button" data-move="10,0">→10</button>
+            <button type="button" data-move="0,1">↓1</button>
+            <button type="button" data-move="0,10">↓10</button>
+          </div>
+          <div class="row">
+            <select id="presets"><option value="">プリセット</option></select>
+            <button id="preset-go" type="button">移動</button>
+            <button id="preset-save" type="button">今の位置を保存</button>
+          </div>
+          <button id="pantilt-stop" class="danger" type="button">停止（全チャンネル off）</button>
+        </div>
+      </details>
+
+      <section class="panel">
+        <h3>この商品のセッション（85pi に残っているもの）</h3>
+        <ul id="sessions" class="list"></ul>
+        <p id="sessions-empty" class="muted small" hidden>まだありません（サーバーが取り込むと消えます）。</p>
+      </section>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" role="status" hidden></div>
+  <script src="/static/app.js" type="module"></script>
+</body>
+</html>

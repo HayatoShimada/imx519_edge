@@ -1,0 +1,13 @@
+# systemd のユーザーサービス（deploy/install.sh が ~/.config/systemd/user/ に置く）
+[Unit]
+Description=IMX519 edge (camera daemon + shooting app)
+After=network-online.target
+
+[Service]
+WorkingDirectory=%h/imx519_edge
+ExecStart=%h/imx519_edge/.venv/bin/python -m imx519_edge serve
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

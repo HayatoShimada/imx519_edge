@@ -10,8 +10,17 @@ DELAY_FRAMES = 2
 
 
 class FakeRequest:
-    def __init__(self, metadata: dict):
+    def __init__(self, metadata: dict, lores_size: tuple[int, int] = (640, 480)):
         self.metadata = metadata
+        self.lores_size = lores_size
+
+    def make_array(self, name: str):
+        import numpy as np
+
+        w, h = self.lores_size
+        yuv = np.full((h * 3 // 2, w), 128, dtype=np.uint8)
+        yuv[:h] = np.linspace(0, 255, w, dtype=np.uint8)[None, :]
+        return yuv
 
     def save(self, name: str, path: str) -> None:
         with open(path, "wb") as f:
@@ -87,10 +96,11 @@ class FakePicamera2:
         return self._next_frame()
 
     def capture_request(self) -> FakeRequest:
-        return FakeRequest(self._next_frame())
+        lores = self.config.get("lores", {}).get("size", (640, 480))
+        return FakeRequest(self._next_frame(), lores)
 
 
 def open_fake_camera(**kwargs) -> Camera:
-    camera = Camera(FakePicamera2(**kwargs), "auto", "manual")
+    camera = Camera(FakePicamera2(**kwargs), "auto", "manual", "continuous")
     camera.start()
     return camera

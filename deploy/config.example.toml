@@ -1,0 +1,24 @@
+# ~/.config/imx519_edge/config.toml（書かない項目は既定値。imx519_edge/config.py を参照）
+
+[server]
+host = "127.0.0.1"
+port = 8519
+
+[storage]
+captures_dir = "~/captures"
+reserve_gb = 5.0
+
+[camera]
+rotate180 = false
+
+[sequence]
+ev = [-2.0, 0.0, 2.0]
+frames = 8
+positions = 1
+
+[cms]
+url = "https://cms.85-store.com"
+
+[pantilt]
+# I2C（dtparam=i2c_arm=on）を有効にし、配線を確かめてから true にする
+enabled = false
