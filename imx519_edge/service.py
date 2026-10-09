@@ -4,12 +4,14 @@
 手が空いているあいだはライブビューの JPEG を作る。撮影ジョブも同じスレッドで 1 本ずつ実行する。
 """
 
+import logging
 import queue
 import random
 import shutil
 import threading
 import time
 import uuid
+from collections import deque
 from collections.abc import Callable
 from concurrent.futures import Future
 from dataclasses import asdict, dataclass, field, fields, replace
@@ -22,6 +24,8 @@ from .manifest import write_manifest
 from .pantilt import PanTilt
 from .sequence import Cancelled, run_burst
 from .session import Product, new_session_id
+
+log = logging.getLogger("imx519_edge")
 
 
 class Busy(Exception):
@@ -83,6 +87,8 @@ class EdgeService:
         self._running = False
         self._thread: threading.Thread | None = None
         self.camera: Camera | None = None
+        self.logs: deque[dict] = deque(maxlen=300)
+        self._last_preview_error = 0.0
 
     # --- ワーカースレッド ---
 
@@ -103,9 +109,11 @@ class EdgeService:
             self.camera = self.camera_factory()
             self.camera.unlock()
             self._set_state("idle")
+            self.log("info", "カメラを開きました")
         except Exception as e:  # カメラが開けない（別のプロセスが使っている など）
             self.error = f"カメラを開けません: {e}"
             self._set_state("error")
+            self.log("error", self.error)
             return
         while self._running:
             try:
@@ -124,6 +132,9 @@ class EdgeService:
             jpeg = self.camera.preview_jpeg(self.config.camera.preview_quality)
         except Exception as e:
             self.error = f"ライブビュー: {e}"
+            if time.monotonic() - self._last_preview_error > 30:  # 同じエラーでログを埋めない
+                self._last_preview_error = time.monotonic()
+                self.log("error", self.error)
             time.sleep(0.5)
             return
         with self._frame_cond:
@@ -166,6 +177,13 @@ class EdgeService:
                 except queue.Full:
                     pass
 
+    def log(self, level: str, message: str) -> None:
+        """画面のログ欄に出す（journald にも残す）。"""
+        entry = {"t": time.time(), "level": level, "message": message}
+        self.logs.append(entry)
+        log.log(logging.ERROR if level == "error" else logging.INFO, message)
+        self.publish("log", entry)
+
     def _set_state(self, state: str) -> None:
         self.state = state
         self.publish("status", self.status())
@@ -200,6 +218,8 @@ class EdgeService:
             return metered
 
         result = self.call(run, timeout=60)
+        lens, exposure = result.lens_position, result.base_exposure_us
+        self.log("info", f"測光して固定: レンズ {lens:.2f}、露光 {exposure:.0f} µs")
         self.publish("status", self.status())
         return result
 
@@ -224,6 +244,7 @@ class EdgeService:
             self.camera.unlock()
 
         self.call(run)
+        self.log("info", "自動（AE / AWB / AF）に戻しました")
         self.publish("status", self.status())
 
     # --- パンチルト ---
@@ -239,12 +260,15 @@ class EdgeService:
             finally:
                 self._set_state("idle")
 
-        return self.call(run)
+        result = self.call(run)
+        self.log("info", f"パンチルト: パン {result['pan']}、チルト {result['tilt']}")
+        return result
 
     def stop_pantilt(self) -> None:
         # 非常停止はキューを待たずに直接送る（I2C はカメラと別のバス）
         if self.pantilt:
             self.pantilt.stop()
+            self.log("info", "パンチルトを止めました（全チャンネル off）")
 
     # --- 撮影ジョブ ---
 
@@ -291,6 +315,9 @@ class EdgeService:
         self.jobs[job.id] = job
         self.current = job
         self.submit(lambda: self._run_job(job, note, lighting, operator))
+        self.log(
+            "info", f"撮影を始めます: {job.session_id}（{job.total} 枚、{product.get('title')}）"
+        )
         self.publish("job", job.public())
         return job
 
@@ -346,12 +373,15 @@ class EdgeService:
             job.manifest_sha256 = write_manifest(partial)
             partial.rename(final)
             job.status = "done"
+            self.log("info", f"撮影が終わりました: {job.session_id}（{job.done} 枚）")
         except Cancelled:
             shutil.rmtree(partial, ignore_errors=True)
             job.status = "cancelled"
+            self.log("info", f"撮影を中止しました: {job.session_id}（{job.done} 枚で止めた）")
         except Exception as e:
             shutil.rmtree(partial, ignore_errors=True)
             job.status, job.error = "failed", str(e)
+            self.log("error", f"撮影に失敗しました: {job.session_id}: {e}")
         finally:
             # 測光して固定していなければ、ライブビューのために自動に戻す
             if self.locked is None:

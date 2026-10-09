@@ -7,12 +7,22 @@
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  <header class="bar">
+  <header class="top">
+  <div class="bar">
     <h1>撮影</h1>
     <div class="chips">
       <span id="state" class="chip">接続中…</span>
       <span id="disk" class="chip muted"></span>
     </div>
+  </div>
+
+  <!-- 通信状態（ブラウザ ⇄ 85pi ⇄ CMS） -->
+  <div class="comm" aria-label="通信状態">
+    <span class="comm-item" id="comm-events" title="状態と進捗の通知（Server-Sent Events）"><i class="dot"></i>通知 <b>—</b></span>
+    <span class="comm-item" id="comm-api" title="85pi の API の応答時間（5 秒ごと）"><i class="dot"></i>API <b>—</b></span>
+    <span class="comm-item" id="comm-live" title="ライブビューの受信"><i class="dot"></i>ライブ <b>未接続</b></span>
+    <span class="comm-item" id="comm-cms" title="85pi から CMS に届くか（30 秒ごと）"><i class="dot"></i>CMS <b>—</b></span>
+  </div>
   </header>
 
   <main>
@@ -71,7 +81,12 @@
 
       <div class="live">
         <img id="live" alt="ライブビュー">
+        <div id="live-idle" class="live-idle">ライブビューは未接続です</div>
         <div id="live-note" class="live-note" hidden></div>
+      </div>
+      <div class="row live-controls">
+        <button id="live-toggle" type="button">ライブビューに接続</button>
+        <span id="live-stats" class="small mono muted"></span>
       </div>
 
       <div id="progress" class="progress" hidden>
@@ -146,6 +161,15 @@
       </section>
     </section>
   </main>
+
+  <section class="logbox" aria-label="ログ">
+    <div class="logbox-head">
+      <span>ログ</span>
+      <label class="small"><input id="log-errors" type="checkbox"> エラーだけ</label>
+      <button id="log-clear" type="button" class="link small">消去</button>
+    </div>
+    <ol id="log"></ol>
+  </section>
 
   <div id="toast" class="toast" role="status" hidden></div>
   <script src="/static/app.js" type="module"></script>

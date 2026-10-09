@@ -3,6 +3,8 @@
 露光時間などの設定は、実機と同じく数フレーム遅れて反映される。保存するファイルは中身の無い小さなもの。
 """
 
+import time
+
 from .camera import Camera
 
 SENSOR_RESOLUTION = (4656, 3496)
@@ -19,7 +21,8 @@ class FakeRequest:
 
         w, h = self.lores_size
         yuv = np.full((h * 3 // 2, w), 128, dtype=np.uint8)
-        yuv[:h] = np.linspace(0, 255, w, dtype=np.uint8)[None, :]
+        shift = (self.metadata.get("SensorTimestamp", 0) // 111_000_000) * 8
+        yuv[:h] = np.roll(np.linspace(0, 255, w, dtype=np.uint8), shift)[None, :]
         return yuv
 
     def save(self, name: str, path: str) -> None:
@@ -41,8 +44,13 @@ class FakePicamera2:
     sensor_resolution = SENSOR_RESOLUTION
 
     def __init__(
-        self, auto_exposure_us: int = 20_000, auto_gain: float = 2.0, af_lens: float = 1.5
+        self,
+        auto_exposure_us: int = 20_000,
+        auto_gain: float = 2.0,
+        af_lens: float = 1.5,
+        frame_interval_s: float = 0.0,  # 実機らしく見せるときは 0.11（9 fps）
     ):
+        self.frame_interval_s = frame_interval_s
         self.state = {
             "ExposureTime": auto_exposure_us,
             "AnalogueGain": auto_gain,
@@ -82,6 +90,8 @@ class FakePicamera2:
         return True
 
     def _next_frame(self) -> dict:
+        if self.frame_interval_s:
+            time.sleep(self.frame_interval_s)
         self.frame += 1
         still = []
         for left, controls in self.pending:

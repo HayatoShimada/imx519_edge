@@ -6,6 +6,7 @@ import json
 import queue
 import re
 import shutil
+import time
 from dataclasses import asdict
 from pathlib import Path
 
@@ -83,6 +84,7 @@ def create_app(
         except NoSpace as e:
             raise HTTPException(507, str(e)) from e
         except CmsError as e:
+            service.log("error", str(e))
             raise HTTPException(502, str(e)) from e
         except TimeoutError as e:
             raise HTTPException(504, "カメラが応答しません") from e
@@ -104,6 +106,19 @@ def create_app(
     @app.get("/api/status")
     def status():
         return service.status()
+
+    @app.get("/api/ping")
+    def ping():
+        return {"t": time.time()}
+
+    @app.get("/api/health")
+    def health():
+        """エッジから先（CMS）に届くか。画面の通信状態に出す。"""
+        return {"cms": cms.health(), "state": service.state}
+
+    @app.get("/api/logs")
+    def logs():
+        return list(service.logs)
 
     @app.get("/api/preview.mjpg")
     async def preview():
@@ -138,12 +153,18 @@ def create_app(
         async def stream():
             try:
                 yield f"event: status\ndata: {json.dumps(service.status())}\n\n"
+                last = time.monotonic()
                 while not await request.is_disconnected():
                     try:
                         event, data = q.get_nowait()
                     except queue.Empty:
+                        # 何も無くても 5 秒ごとに送り、画面がつながっているかを判断できるようにする
+                        if time.monotonic() - last > 5:
+                            last = time.monotonic()
+                            yield f"event: ping\ndata: {json.dumps({'t': time.time()})}\n\n"
                         await asyncio.sleep(0.2)
                         continue
+                    last = time.monotonic()
                     yield f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
             finally:
                 service.unsubscribe(q)
@@ -210,7 +231,7 @@ def create_app(
         brand_id = body.brand_id
         if brand_id is None and body.brand_name:
             brand_id = guard(cms.create_brand, body.brand_name.strip())["id"]
-        return guard(
+        product = guard(
             cms.create_draft,
             body.kind,
             body.name.strip(),
@@ -219,6 +240,8 @@ def create_app(
             body.category_id,
             body.category_name,
         )
+        service.log("info", f"CMS に保留の下書きを作りました: #{product['id']} {product['title']}")
+        return product
 
     # --- 撮影ジョブ ---
 
@@ -296,6 +319,7 @@ def create_app(
         if manifest_sha256 != manifest_digest(path):
             raise HTTPException(409, "manifest が一致しません")
         shutil.rmtree(path)
+        service.log("info", f"取り込み済みのセッションを消しました: {session_id}")
         return {"deleted": session_id}
 
     return app

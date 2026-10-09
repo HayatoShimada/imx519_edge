@@ -28,6 +28,166 @@ function toast(message, error = false) {
   toastTimer = setTimeout(() => (el.hidden = true), error ? 6000 : 3000);
 }
 
+// --- ログ（サーバーの出来事と、この画面の出来事） ---
+
+const LOG_MAX = 200;
+function addLog(entry, client = false) {
+  const li = document.createElement('li');
+  li.className = `${entry.level === 'error' ? 'error' : ''} ${client ? 'client' : ''}`;
+  const t = new Date((entry.t ?? Date.now() / 1000) * 1000);
+  const time = document.createElement('time');
+  time.textContent = t.toLocaleTimeString('ja-JP', { hour12: false });
+  li.append(time, (client ? '画面: ' : '') + entry.message);
+  const box = $('log');
+  const atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 4;
+  box.append(li);
+  while (box.children.length > LOG_MAX) box.firstChild.remove();
+  if (atBottom) box.scrollTop = box.scrollHeight;
+}
+const clientLog = (message, level = 'info') => addLog({ level, message }, true);
+
+// --- 通信状態 ---
+
+function setComm(id, level, text) {
+  const el = $(id);
+  el.className = `comm-item ${level}`;
+  el.querySelector('b').textContent = text;
+}
+
+const comm = { eventsAt: 0, eventsOpen: false };
+
+async function pingApi() {
+  const start = performance.now();
+  try {
+    const res = await fetch('/api/ping', { cache: 'no-store' });
+    if (!res.ok) throw new Error(res.status);
+    const ms = Math.round(performance.now() - start);
+    setComm('comm-api', ms < 300 ? 'ok' : 'warn', `${ms} ms`);
+    if (comm.apiDown) { comm.apiDown = false; clientLog(`API に戻りました（${ms} ms）`); }
+  } catch (e) {
+    setComm('comm-api', 'bad', '応答なし');
+    if (!comm.apiDown) { comm.apiDown = true; clientLog(`API が応答しません: ${e.message}`, 'error'); }
+  }
+}
+
+async function checkCms() {
+  try {
+    const h = await (await fetch('/api/health', { cache: 'no-store' })).json();
+    setComm('comm-cms', h.cms.ok ? 'ok' : 'bad', h.cms.ok ? `${h.cms.ms} ms` : 'NG');
+    $('comm-cms').title = h.cms.ok ? `85pi から CMS に届きます（${h.cms.role} として）` : h.cms.error;
+    if (!h.cms.ok && !comm.cmsDown) clientLog(`CMS に届きません: ${h.cms.error}`, 'error');
+    comm.cmsDown = !h.cms.ok;
+  } catch {
+    setComm('comm-cms', 'bad', '不明');
+  }
+}
+
+function watchEvents() {
+  // 通知（SSE）はサーバーが 5 秒ごとに何か送る。12 秒来なければ止まっているとみなす
+  const age = (Date.now() - comm.eventsAt) / 1000;
+  if (!comm.eventsOpen) setComm('comm-events', 'bad', '再接続中');
+  else if (age > 12) setComm('comm-events', 'warn', `${Math.round(age)} 秒無音`);
+  else setComm('comm-events', 'ok', '接続');
+}
+
+// --- ライブビュー（MJPEG を自分で読み、フレーム数と通信量を測る） ---
+
+const live = { abort: null, frames: [], bytes: [], lastAt: 0, url: null };
+
+function indexOf(buf, pattern, from = 0) {
+  outer: for (let i = from; i <= buf.length - pattern.length; i++) {
+    for (let j = 0; j < pattern.length; j++) if (buf[i + j] !== pattern[j]) continue outer;
+    return i;
+  }
+  return -1;
+}
+const CRLF2 = new TextEncoder().encode('\r\n\r\n');
+
+async function startLive() {
+  stopLive(false);
+  const controller = new AbortController();
+  live.abort = controller;
+  $('live-toggle').textContent = 'ライブビューを切断';
+  $('live-idle').textContent = '接続中…';
+  $('live-idle').hidden = false;
+  setComm('comm-live', 'warn', '接続中');
+  clientLog('ライブビューに接続します');
+  try {
+    const res = await fetch('/api/preview.mjpg', { signal: controller.signal, cache: 'no-store' });
+    if (!res.ok) throw new Error(`${res.status}`);
+    const reader = res.body.getReader();
+    let buf = new Uint8Array(0);
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) throw new Error('サーバーが切断しました');
+      const next = new Uint8Array(buf.length + value.length);
+      next.set(buf);
+      next.set(value, buf.length);
+      buf = next;
+      // --frame\r\nContent-Type: image/jpeg\r\nContent-Length: N\r\n\r\n<JPEG>\r\n
+      for (;;) {
+        const headEnd = indexOf(buf, CRLF2);
+        if (headEnd < 0) break;
+        const head = new TextDecoder().decode(buf.subarray(0, headEnd));
+        const length = Number(/Content-Length: (\d+)/i.exec(head)?.[1]);
+        const start = headEnd + 4;
+        if (!length || buf.length < start + length) break;
+        showFrame(buf.slice(start, start + length));
+        buf = buf.slice(start + length + 2);
+      }
+    }
+  } catch (e) {
+    if (controller.signal.aborted) return;
+    clientLog(`ライブビューが切れました: ${e.message}`, 'error');
+    stopLive(false);
+    setComm('comm-live', 'bad', '切断');
+  }
+}
+
+function showFrame(jpeg) {
+  const now = performance.now();
+  live.frames.push(now);
+  live.bytes.push([now, jpeg.length]);
+  live.lastAt = now;
+  const url = URL.createObjectURL(new Blob([jpeg], { type: 'image/jpeg' }));
+  $('live').src = url;
+  if (live.url) URL.revokeObjectURL(live.url);
+  live.url = url;
+  $('live-idle').hidden = true;
+}
+
+function stopLive(log = true) {
+  if (live.abort) {
+    live.abort.abort();
+    live.abort = null;
+    if (log) clientLog('ライブビューを切断しました');
+  }
+  live.frames = [];
+  live.bytes = [];
+  $('live-toggle').textContent = 'ライブビューに接続';
+  $('live-idle').textContent = 'ライブビューは未接続です';
+  $('live-idle').hidden = false;
+  $('live').removeAttribute('src');
+  if (live.url) URL.revokeObjectURL(live.url);
+  live.url = null;
+  $('live-stats').textContent = '';
+  setComm('comm-live', '', '未接続');
+}
+
+function watchLive() {
+  if (!live.abort) return;
+  const now = performance.now();
+  live.frames = live.frames.filter((t) => now - t < 3000);
+  live.bytes = live.bytes.filter(([t]) => now - t < 3000);
+  const fps = live.frames.length / 3;
+  const kbps = (live.bytes.reduce((a, [, n]) => a + n, 0) * 8) / 3 / 1000;
+  const age = live.lastAt ? (now - live.lastAt) / 1000 : null;
+  $('live-stats').textContent = `${fps.toFixed(1)} fps・${Math.round(kbps)} kbps` + (age != null ? `・${age.toFixed(1)} 秒前` : '');
+  const capturing = status?.state === 'capturing';
+  if (age == null || age > 3) setComm('comm-live', capturing ? 'warn' : 'bad', capturing ? '撮影中は停止' : '受信なし');
+  else setComm('comm-live', fps >= 3 ? 'ok' : 'warn', `${fps.toFixed(1)} fps`);
+}
+
 async function api(path, init = {}) {
   const res = await fetch(path, {
     ...init,
@@ -88,8 +248,18 @@ function renderJob(j) {
 
 function connectEvents() {
   const events = new EventSource('/api/events');
-  events.addEventListener('status', (e) => { status = JSON.parse(e.data); renderStatus(); });
+  const seen = () => (comm.eventsAt = Date.now());
+  events.onopen = () => {
+    if (!comm.eventsOpen) clientLog('通知に接続しました');
+    comm.eventsOpen = true;
+    seen();
+    watchEvents();
+  };
+  events.addEventListener('ping', seen);
+  events.addEventListener('log', (e) => { seen(); addLog(JSON.parse(e.data)); });
+  events.addEventListener('status', (e) => { seen(); status = JSON.parse(e.data); renderStatus(); });
   events.addEventListener('job', (e) => {
+    seen();
     const j = JSON.parse(e.data);
     const was = job?.status;
     renderJob(j);
@@ -99,7 +269,13 @@ function connectEvents() {
       loadSessions();
     }
   });
-  events.onerror = () => { $('state').textContent = '再接続中…'; $('state').className = 'chip bad'; };
+  events.onerror = () => {
+    if (comm.eventsOpen) clientLog('通知が切れました。再接続します', 'error');
+    comm.eventsOpen = false;
+    watchEvents();
+    $('state').textContent = '再接続中…';
+    $('state').className = 'chip bad';
+  };
 }
 
 // --- 画面 1: 商品 ---
@@ -167,14 +343,13 @@ function openShoot(p) {
   $('p-title').textContent = p.title;
   $('view-product').hidden = true;
   $('view-shoot').hidden = false;
-  $('live').src = '/api/preview.mjpg';
   loadSessions();
 }
 
 function openProduct() {
   product = null;
   store(KEY_PRODUCT, null);
-  $('live').removeAttribute('src');
+  stopLive();
   $('view-shoot').hidden = true;
   $('view-product').hidden = false;
 }
@@ -224,6 +399,9 @@ function bind() {
     });
   });
   $('change-product').onclick = openProduct;
+  $('live-toggle').onclick = () => (live.abort ? stopLive() : startLive());
+  $('log-clear').onclick = () => ($('log').innerHTML = '');
+  $('log-errors').onchange = () => $('log').classList.toggle('errors-only', $('log-errors').checked);
 
   $('shoot').onclick = () => withBusy($('shoot'), async () => {
     const ev = $('ev').value.trim().split(/\s+/).map(Number).filter((n) => !Number.isNaN(n));
@@ -275,7 +453,17 @@ async function loadPresets() {
 
 async function main() {
   bind();
+  (await api('/api/logs').catch(() => [])).forEach((entry) => addLog(entry));
   connectEvents();
+  pingApi();
+  checkCms();
+  setInterval(pingApi, 5000);
+  setInterval(checkCms, 30000);
+  setInterval(() => { watchEvents(); watchLive(); }, 1000);
+  document.addEventListener('visibilitychange', () => {
+    // 画面を閉じているあいだはライブビューを切り、通信量を抑える
+    if (document.hidden && live.abort) stopLive();
+  });
   try {
     await loadOptions();
   } catch (e) {

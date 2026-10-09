@@ -156,3 +156,13 @@ def test_create_draft_with_new_brand(client):
 def test_session_paths_are_checked(client):
     assert client.get("/api/sessions/../etc/manifest").status_code == 404
     assert client.get("/api/sessions/2026-10-09_000000/files/x").status_code == 404
+
+
+def test_logs_ping_and_health(client):
+    client.cms.health = lambda: {"ok": True, "ms": 12, "role": "admin", "error": None}
+    assert client.get("/api/ping").json()["t"] > 0
+    assert client.get("/api/health").json()["cms"]["ok"] is True
+    client.post("/api/camera/meter", json={"lens_position": 1.0})
+    messages = [e["message"] for e in client.get("/api/logs").json()]
+    assert "カメラを開きました" in messages
+    assert any(m.startswith("測光して固定") for m in messages)

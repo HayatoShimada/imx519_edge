@@ -32,8 +32,8 @@ body {
   font: 16px/1.5 system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif;
   padding-bottom: env(safe-area-inset-bottom);
 }
+.top { position: sticky; top: 0; z-index: 2; }
 .bar {
-  position: sticky; top: 0; z-index: 2;
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
   padding: 10px 16px; background: var(--surface); border-bottom: 1px solid var(--line);
 }
@@ -103,3 +103,40 @@ button.link { border: 0; background: none; color: var(--accent); padding: 4px; m
   background: var(--text); color: var(--bg); font-size: 14px;
 }
 .toast.error { background: var(--danger); color: #fff; }
+
+/* 通信状態 */
+.comm {
+  display: flex; gap: 4px 12px; flex-wrap: wrap;
+  padding: 4px 16px; background: var(--surface); border-bottom: 1px solid var(--line);
+  font-size: 12px; color: var(--muted);
+}
+.comm-item { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.comm-item b { font-weight: 500; color: var(--text); font-family: ui-monospace, Menlo, monospace; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--line); display: inline-block; }
+.comm-item.ok .dot { background: var(--accent); }
+.comm-item.warn .dot { background: #d29a22; }
+.comm-item.bad .dot { background: var(--danger); }
+.live-idle {
+  position: absolute; inset: 0; display: grid; place-items: center;
+  color: #bbb; font-size: 14px; pointer-events: none;
+}
+.live-controls { justify-content: space-between; }
+/* ログ（小さく） */
+.logbox {
+  max-width: 720px; margin: 0 auto 24px; padding: 0 16px;
+}
+.logbox-head { display: flex; align-items: center; gap: 12px; font-size: 12px; color: var(--muted); }
+.logbox-head span { flex: 1; font-weight: 600; }
+.logbox-head input { width: auto; min-height: 0; }
+.logbox-head button { min-height: 0; }
+#log {
+  list-style: none; margin: 4px 0 0; padding: 6px 8px;
+  max-height: 9.5em; overflow-y: auto;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
+  font: 11px/1.45 ui-monospace, Menlo, monospace; color: var(--muted);
+}
+#log li { white-space: pre-wrap; overflow-wrap: anywhere; }
+#log li time { color: var(--muted); margin-right: 6px; }
+#log li.error { color: var(--danger); }
+#log li.client { opacity: 0.8; }
+#log.errors-only li:not(.error) { display: none; }

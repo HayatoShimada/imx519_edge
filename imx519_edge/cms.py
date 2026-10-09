@@ -61,6 +61,30 @@ class Cms:
         self._cache[key] = (time.monotonic(), value)
         return value
 
+    def health(self) -> dict:
+        """CMS に届くか、誰として認証されるか（30 秒覚えておく）。"""
+
+        def load() -> dict:
+            start = time.monotonic()
+            try:
+                me = self._request("GET", "/api/users/me") or {}
+                user = (me.get("user") or {}).get("role")
+                return {
+                    "ok": user is not None,
+                    "ms": _ms(start),
+                    "role": user,
+                    "error": None if user else "CMS に認証されませんでした",
+                }
+            except CmsError as e:
+                return {"ok": False, "ms": _ms(start), "role": None, "error": str(e)}
+
+        hit = self._cache.get("health")
+        if hit and time.monotonic() - hit[0] < 30:
+            return hit[1]
+        value = load()
+        self._cache["health"] = (time.monotonic(), value)
+        return value
+
     def hold_supported(self, refresh: bool = False) -> bool:
         """CMS に保留の欄（shopifyHold）があるか。無い欄で絞り込むと Payload は 400 を返す。"""
 
@@ -131,6 +155,10 @@ class Cms:
         }
         doc = self._request("POST", "/api/products", body=body)["doc"]
         return summary(doc)
+
+
+def _ms(start: float) -> int:
+    return round((time.monotonic() - start) * 1000)
 
 
 def _held_params(limit: int) -> dict:
