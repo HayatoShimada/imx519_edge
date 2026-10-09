@@ -7,6 +7,8 @@ let options = null;
 let product = null;
 let status = null;
 let job = null;
+const finished = new Set(); // 終わったと知らせたジョブ（状態と進捗の両方の通知で二重に知らせない）
+const TERMINAL = ['done', 'failed', 'cancelled'];
 
 function store(key, value) {
   try {
@@ -226,7 +228,12 @@ function renderStatus() {
   $('pan').textContent = pt.pan ?? '—';
   $('tilt').textContent = pt.tilt ?? '—';
 
-  if (status.job) renderJob(status.job);
+  if (status.job) {
+    // 画面を開く前に終わっていたジョブは知らせない
+    if (!job && TERMINAL.includes(status.job.status)) finished.add(status.job.id);
+    renderJob(status.job);
+    onJobFinished(status.job);
+  }
   const d = status.defaults;
   if (!$('ev').value) $('ev').value = d.ev.join(' ');
   if (!$('frames').value) $('frames').value = d.frames;
@@ -246,6 +253,14 @@ function renderJob(j) {
   $('live-note').textContent = running ? '撮影中はライブビューを止めています' : '';
 }
 
+function onJobFinished(j) {
+  if (!TERMINAL.includes(j.status) || finished.has(j.id)) return;
+  finished.add(j.id);
+  if (j.status === 'done') toast(`撮影が終わりました（${j.session_id}）`);
+  else if (j.status === 'failed') toast(`撮影に失敗しました: ${j.error}`, true);
+  loadSessions();
+}
+
 function connectEvents() {
   const events = new EventSource('/api/events');
   const seen = () => (comm.eventsAt = Date.now());
@@ -261,13 +276,8 @@ function connectEvents() {
   events.addEventListener('job', (e) => {
     seen();
     const j = JSON.parse(e.data);
-    const was = job?.status;
     renderJob(j);
-    if (j.status !== was && ['done', 'failed', 'cancelled'].includes(j.status)) {
-      if (j.status === 'done') toast(`撮影が終わりました（${j.session_id}）`);
-      else if (j.status === 'failed') toast(`撮影に失敗しました: ${j.error}`, true);
-      loadSessions();
-    }
+    onJobFinished(j);
   });
   events.onerror = () => {
     if (comm.eventsOpen) clientLog('通知が切れました。再接続します', 'error');

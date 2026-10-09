@@ -24,6 +24,8 @@
   }
 }
 * { box-sizing: border-box; }
+/* display を指定した要素でも hidden 属性で隠れるようにする */
+[hidden] { display: none !important; }
 html { -webkit-text-size-adjust: 100%; }
 body {
   margin: 0;
@@ -65,7 +67,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
 button.danger { color: var(--danger); border-color: var(--danger); }
 button.big { min-height: 60px; font-size: 20px; width: 100%; }
-button.link { border: 0; background: none; color: var(--accent); padding: 4px; min-height: 0; }
+button.link { border: 0; background: none; color: var(--accent); padding: 4px; min-height: 0; white-space: nowrap; }
 .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .row > .field { flex: 1 1 120px; }
 .row > select { flex: 1 1 140px; width: auto; }
@@ -87,6 +89,7 @@ button.link { border: 0; background: none; color: var(--accent); padding: 4px; m
 .product-head h2 { margin: 0; font-size: 18px; overflow-wrap: anywhere; }
 .live { position: relative; background: #000; border-radius: var(--radius); overflow: hidden; aspect-ratio: 4 / 3; }
 .live img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.live img:not([src]) { visibility: hidden; }
 .live-note { position: absolute; inset: auto 0 0 0; background: rgba(0, 0, 0, 0.6); color: #fff; padding: 6px 10px; font-size: 14px; }
 .actions { display: grid; gap: 8px; }
 .progress { display: grid; gap: 4px; }
