@@ -29,6 +29,7 @@ def serve(cfg: config_mod.Config, fake: bool = False) -> None:
     from .cms import Cms
     from .pantilt import PCA9685, PanTilt, Presets
     from .service import EdgeService
+    from .studio import Studio
 
     pantilt = presets = None
     pt = cfg.pantilt
@@ -46,9 +47,10 @@ def serve(cfg: config_mod.Config, fake: bool = False) -> None:
         camera_factory = lambda: open_fake_camera(frame_interval_s=0.11)  # noqa: E731
     else:
         camera_factory = lambda: Camera.open(cfg.camera.rotate180, cfg.camera.preview_size)  # noqa: E731
-    service = EdgeService(cfg, camera_factory, pantilt)
+    studio = Studio(cfg.studio.url, cfg.studio.timeout_s)
+    service = EdgeService(cfg, camera_factory, pantilt, on_session=lambda sid: studio.wake())
     cms = Cms(cfg.cms.url, cfg.cms.timeout_s, cfg.cms.cache_s)
-    app = create_app(service, cms, presets, manage_service=True)
+    app = create_app(service, cms, presets, manage_service=True, studio=studio)
     uvicorn.run(app, host=cfg.server.host, port=cfg.server.port, workers=1)
 
 

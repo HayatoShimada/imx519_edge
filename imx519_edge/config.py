@@ -52,6 +52,14 @@ class CmsConfig:
 
 
 @dataclass
+class StudioConfig:
+    """サーバー（home-linux の super_imx519 のスタジオ）。完成画像と処理の進み具合を中継する。"""
+
+    url: str = "http://home-linux.taila713c8.ts.net:8520"
+    timeout_s: float = 10.0
+
+
+@dataclass
 class PanTiltConfig:
     enabled: bool = False
     bus: int = 1
@@ -79,6 +87,7 @@ class Config:
     camera: CameraConfig = field(default_factory=CameraConfig)
     sequence: SequenceConfig = field(default_factory=SequenceConfig)
     cms: CmsConfig = field(default_factory=CmsConfig)
+    studio: StudioConfig = field(default_factory=StudioConfig)
     pantilt: PanTiltConfig = field(default_factory=PanTiltConfig)
 
 

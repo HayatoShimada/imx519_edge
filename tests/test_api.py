@@ -31,6 +31,9 @@ class FakeCms:
     def hold_supported(self, refresh=False):
         return True
 
+    def health(self):
+        return {"ok": True, "ms": 5, "role": "admin", "error": None}
+
     def held_products(self):
         return [PRODUCT]
 
@@ -45,6 +48,21 @@ class FakeCms:
         return PRODUCT
 
 
+class FakeStudio:
+    def json(self, path, method="GET", params=None):
+        if path == "/api/sessions":
+            return [
+                {"session_id": "2026-10-09_121401_c434", "state": "processing", "params": params}
+            ]
+        return {"ok": True, "path": path, "method": method}
+
+    def image(self, path):
+        return b"\xff\xd8" + path.encode()
+
+    def health(self):
+        return {"ok": True, "ms": 3, "error": None, "edge_ok": True}
+
+
 @pytest.fixture
 def client(tmp_path):
     config = Config(
@@ -55,7 +73,7 @@ def client(tmp_path):
     service = EdgeService(config, lambda: open_fake_camera(), free_bytes=lambda p: free["bytes"])
     service.start()
     cms = FakeCms()
-    app = create_app(service, cms, whois=lambda ip: f"whois-{ip}")
+    app = create_app(service, cms, whois=lambda ip: f"whois-{ip}", studio=FakeStudio())
     with TestClient(app) as c:
         c.service, c.cms, c.free = service, cms, free
         wait(lambda: service.state == "idle")
@@ -159,7 +177,6 @@ def test_session_paths_are_checked(client):
 
 
 def test_logs_ping_and_health(client):
-    client.cms.health = lambda: {"ok": True, "ms": 12, "role": "admin", "error": None}
     assert client.get("/api/ping").json()["t"] > 0
     assert client.get("/api/health").json()["cms"]["ok"] is True
     client.post("/api/camera/meter", json={"lens_position": 1.0})
@@ -179,3 +196,16 @@ def test_operator_from_camera_entry(client):
         client.get(f"/api/sessions/{job['session_id']}/files/session.json").content
     )
     assert session["operator"] == "whois-100.64.0.9"
+
+
+def test_studio_relay(client):
+    rows = client.get("/api/studio/sessions", params={"cms_id": 434}).json()
+    assert rows[0]["state"] == "processing" and rows[0]["params"] == {"cms_id": 434}
+    res = client.get("/api/studio/sessions/2026-10-09_121401_c434/preview.jpg")
+    assert res.content == b"\xff\xd8/api/sessions/2026-10-09_121401_c434/preview.jpg"
+    assert client.get("/api/studio/sessions/2026-10-09_121401_c434/session.json").status_code == 404
+    assert (
+        client.post("/api/studio/sessions/2026-10-09_121401_c434/reprocess").json()["method"]
+        == "POST"
+    )
+    assert client.get("/api/health").json()["studio"]["ok"] is True

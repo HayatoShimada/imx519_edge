@@ -13,7 +13,9 @@ Arducam IMX519（16MP / AF）で服を撮る、Raspberry Pi 側のコード。85
 
 1. 「新しい商品」で入力して「下書きを作って撮影へ」。続きを撮るときは「保留中の下書き」から選ぶ
 2. 「ライブビューに接続」で構図を見て「撮影」。必要なら「カメラ」で先に測光して固定する。画面を閉じるとライブビューは切れる
-3. 撮ったセッションは `~/captures/<session_id>/` に置かれ、サーバーが取り込むと消える
+3. 撮ったセッションは `~/captures/<session_id>/` に置かれる。サーバー（home-linux の super_imx519 のスタジオ）が取り込んで
+   完成画像を作る。「この商品のセッションと完成画像」に、完成待ちのあいだは進捗バー（取り込み・処理）、完成したら画像が出る
+   （タップで大きく見る）。取り込まれたセッションは 85pi から消える
 4. 価格・SKU・原価は CMS で入れ、「保留」を外して保存すると Shopify に作られる
 
 CMS に保留の欄が無いあいだ（85store-cms が古いあいだ）は、下書きを作らない。
@@ -26,6 +28,7 @@ CMS に保留の欄が無いあいだ（85store-cms が古いあいだ）は、�
 | API | 85pi の API の応答時間（5 秒ごと） |
 | ライブ | ライブビューの fps（下に fps・通信量・最後のフレームからの時間）。撮影中は止まる |
 | CMS | 85pi から CMS に届くか、何 ms か（30 秒ごと） |
+| サーバー | 85pi からスタジオ（`[studio] url`、既定 `http://home-linux.taila713c8.ts.net:8520`）に届くか（30 秒ごと） |
 
 画面の下のログには、サーバーの出来事（撮影・測光・CMS・取り込み・エラー）と、画面の出来事（接続・切断）が出る。
 
@@ -104,6 +107,8 @@ python3 -m imx519_edge burst --out ~/captures/test1 --frames 8 --ev -2 0 2
 | GET・PUT | `/api/pantilt/presets` | 構図のプリセット |
 | GET | `/api/cms/options`・`/api/cms/products`・`/api/cms/products/{id}` | CMS の選択肢・保留中の下書き・商品 1 件 |
 | POST | `/api/cms/products` | 保留の下書きを作る |
+| GET | `/api/studio/sessions`・`/api/studio/sessions/{id}/preview.jpg`・`final.jpg` | スタジオの状態・進捗・完成画像（中継） |
+| POST | `/api/studio/sessions/{id}/reprocess` | 処理をやり直す |
 | POST | `/api/jobs` | 撮影（`cms_product_id` 必須） |
 | GET・DELETE | `/api/jobs/{id}` | 進捗 / 中止 |
 | GET | `/api/sessions`・`/api/sessions/{id}/manifest`・`/api/sessions/{id}/files/{name}` | 取り込み用 |

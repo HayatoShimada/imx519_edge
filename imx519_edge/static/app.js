@@ -72,15 +72,23 @@ async function pingApi() {
   }
 }
 
-async function checkCms() {
+async function checkHealth() {
   try {
     const h = await (await fetch('/api/health', { cache: 'no-store' })).json();
     setComm('comm-cms', h.cms.ok ? 'ok' : 'bad', h.cms.ok ? `${h.cms.ms} ms` : 'NG');
     $('comm-cms').title = h.cms.ok ? `85pi から CMS に届きます（${h.cms.role} として）` : h.cms.error;
     if (!h.cms.ok && !comm.cmsDown) clientLog(`CMS に届きません: ${h.cms.error}`, 'error');
     comm.cmsDown = !h.cms.ok;
+    const st = h.studio;
+    setComm('comm-studio', st.ok ? (st.edge_ok === false ? 'warn' : 'ok') : 'bad', st.ok ? `${st.ms} ms` : 'NG');
+    $('comm-studio').title = st.ok
+      ? (st.edge_ok === false ? 'サーバーから 85pi に届いていません（取り込めません）' : '85pi からサーバーに届きます')
+      : st.error;
+    if (!st.ok && !comm.studioDown) clientLog(`サーバーに届きません: ${st.error}`, 'error');
+    comm.studioDown = !st.ok;
   } catch {
     setComm('comm-cms', 'bad', '不明');
+    setComm('comm-studio', 'bad', '不明');
   }
 }
 
@@ -360,17 +368,92 @@ function openProduct() {
   product = null;
   store(KEY_PRODUCT, null);
   stopLive();
+  clearTimeout(sessionsTimer);
+  sessionRows.clear();
+  $('sessions').innerHTML = '';
   $('view-shoot').hidden = true;
   $('view-product').hidden = false;
 }
 
+const SESSION_STATES = {
+  on_edge: ['85pi（取り込み待ち）', 'busy'],
+  ingesting: ['取り込み中', 'busy'],
+  queued: ['処理待ち', 'busy'],
+  processing: ['処理中', 'busy'],
+  done: ['完成', 'done'],
+  failed: ['失敗', 'failed'],
+  skipped: ['自動では処理しない', ''],
+};
+const PENDING = ['on_edge', 'ingesting', 'queued', 'processing'];
+let sessionsTimer = null;
+const sessionRows = new Map(); // セッション ID → { li, sig }（変わったものだけ描き直す）
+
 async function loadSessions() {
+  clearTimeout(sessionsTimer);
   if (!product) return;
-  const sessions = await api(`/api/sessions?cms_id=${product.id}`).catch(() => []);
-  $('sessions').innerHTML = sessions
-    .map((s) => `<li class="session"><span class="mono">${escapeHtml(s.session_id)}</span><span>${s.shots} 枚・${(s.bytes / 1e9).toFixed(2)} GB</span></li>`)
-    .join('');
-  $('sessions-empty').hidden = sessions.length > 0;
+  const id = product.id;
+  const [edgeRows, studio] = await Promise.all([
+    api(`/api/sessions?cms_id=${id}`).catch(() => []),
+    api(`/api/studio/sessions?cms_id=${id}`).then((rows) => ({ rows })).catch((e) => ({ rows: [], error: e.message })),
+  ]);
+  if (product?.id !== id) return;
+  const rows = [...studio.rows];
+  const known = new Set(rows.map((r) => r.session_id));
+  // サーバーがまだ知らない（または届かない）とき、85pi に残っているものを出す
+  edgeRows.forEach((r) => known.has(r.session_id) || rows.push({ ...r, state: 'on_edge', progress: null }));
+  rows.sort((a, b) => (a.session_id < b.session_id ? 1 : -1));
+  renderSessions(rows);
+  $('sessions-note').hidden = !studio.error;
+  $('sessions-note').textContent = studio.error ? `サーバーに届かないため、85pi に残っているものだけ出しています（${studio.error}）` : '';
+  // 完成待ちがあれば 2 秒ごと、なければ 5 秒ごとに見直す
+  const waiting = rows.some((r) => PENDING.includes(r.state));
+  sessionsTimer = setTimeout(loadSessions, waiting ? 2000 : 5000);
+}
+
+function renderSessions(rows) {
+  const list = $('sessions');
+  const ids = new Set(rows.map((r) => r.session_id));
+  for (const [id, entry] of sessionRows) if (!ids.has(id)) { entry.li.remove(); sessionRows.delete(id); }
+  rows.forEach((r, i) => {
+    let entry = sessionRows.get(r.session_id);
+    if (!entry) {
+      entry = { li: document.createElement('li'), sig: '' };
+      sessionRows.set(r.session_id, entry);
+    }
+    const sig = JSON.stringify([r.state, r.progress, r.error, r.shots]);
+    if (entry.sig !== sig) {
+      entry.li.innerHTML = sessionHtml(r);
+      entry.sig = sig;
+    }
+    if (list.children[i] !== entry.li) list.insertBefore(entry.li, list.children[i] ?? null);
+  });
+  $('sessions-empty').hidden = rows.length > 0;
+}
+
+function sessionHtml(r) {
+  const [label, cls] = SESSION_STATES[r.state] ?? [r.state, ''];
+  const id = escapeHtml(r.session_id);
+  let body = '';
+  if (PENDING.includes(r.state)) {
+    const p = r.progress;
+    const pct = p && p.total ? Math.round((100 * p.done) / p.total) : 0;
+    const text = p ? `${escapeHtml(p.label)}（${pct}%）` : label;
+    body = `<div class="session-progress"><div class="session-bar"><div class="session-fill ${p ? '' : 'waiting'}" style="width:${pct}%"></div></div><span>${text}</span></div>`;
+  } else if (r.state === 'done') {
+    const size = r.final_size ? `${r.final_size[0]}×${r.final_size[1]}` : '';
+    body = `<button type="button" class="thumb" data-view="${id}" aria-label="完成画像を大きく見る"><img loading="lazy" src="/api/studio/sessions/${id}/preview.jpg" alt="完成画像 ${id}"></button><span class="small muted">${size}・タップで大きく見る</span>`;
+  } else if (r.state === 'failed') {
+    body = `<div class="session-error">${escapeHtml(r.error ?? '')}</div><div><button type="button" data-reprocess="${id}">やり直す</button></div>`;
+  }
+  return `<div class="session-head"><span class="mono">${id}</span><span>${r.shots ?? '—'} 枚</span><span class="badge ${cls}">${label}</span></div>${body}`;
+}
+
+function openViewer(id) {
+  const url = `/api/studio/sessions/${encodeURIComponent(id)}/final.jpg`;
+  $('viewer-title').textContent = id;
+  $('viewer-img').src = url;
+  $('viewer-open').href = url;
+  $('viewer').hidden = false;
 }
 
 async function withBusy(button, fn) {
@@ -409,6 +492,17 @@ function bind() {
     });
   });
   $('change-product').onclick = openProduct;
+  $('sessions').addEventListener('click', (e) => {
+    const view = e.target.closest('[data-view]');
+    if (view) openViewer(view.dataset.view);
+    const redo = e.target.closest('[data-reprocess]');
+    if (redo) withBusy(redo, async () => {
+      await post(`/api/studio/sessions/${encodeURIComponent(redo.dataset.reprocess)}/reprocess`);
+      toast('処理をやり直します');
+      loadSessions();
+    });
+  });
+  $('viewer-close').onclick = () => { $('viewer').hidden = true; $('viewer-img').removeAttribute('src'); };
   $('live-toggle').onclick = () => (live.abort ? stopLive() : startLive());
   $('log-clear').onclick = () => ($('log').innerHTML = '');
   $('log-errors').onchange = () => $('log').classList.toggle('errors-only', $('log-errors').checked);
@@ -466,9 +560,9 @@ async function main() {
   (await api('/api/logs').catch(() => [])).forEach((entry) => addLog(entry));
   connectEvents();
   pingApi();
-  checkCms();
+  checkHealth();
   setInterval(pingApi, 5000);
-  setInterval(checkCms, 30000);
+  setInterval(checkHealth, 30000);
   setInterval(() => { watchEvents(); watchLive(); }, 1000);
   document.addEventListener('visibilitychange', () => {
     // 画面を閉じているあいだはライブビューを切り、通信量を抑える

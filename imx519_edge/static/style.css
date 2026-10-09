@@ -143,3 +143,30 @@ button.link { border: 0; background: none; color: var(--accent); padding: 4px; m
 #log li.error { color: var(--danger); }
 #log li.client { opacity: 0.8; }
 #log.errors-only li:not(.error) { display: none; }
+
+/* セッションと完成画像 */
+.sessions { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.sessions li { border-top: 1px solid var(--line); padding-top: 10px; display: grid; gap: 6px; }
+.sessions li:first-child { border-top: 0; padding-top: 0; }
+.session-head { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; flex-wrap: wrap; }
+.session-head .mono { overflow-wrap: anywhere; }
+.badge { font-size: 12px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap; }
+.badge.done { border-color: var(--accent); color: var(--accent); }
+.badge.busy { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+.badge.failed { border-color: var(--danger); color: var(--danger); }
+.session-progress { display: grid; gap: 2px; }
+.session-progress .session-bar { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; }
+.session-progress .session-fill { height: 100%; background: var(--accent); transition: width 0.4s; }
+.session-progress .session-fill.waiting { width: 30% !important; opacity: 0.4; animation: waiting 1.6s ease-in-out infinite; }
+@keyframes waiting { 0% { margin-left: 0; } 50% { margin-left: 70%; } 100% { margin-left: 0; } }
+@media (prefers-reduced-motion: reduce) { .session-progress .session-fill.waiting { animation: none; } }
+.session-progress span { font-size: 12px; color: var(--muted); }
+.thumb { padding: 0; border: 0; background: none; min-height: 0; border-radius: 8px; overflow: hidden; }
+.thumb img { width: 100%; display: block; border-radius: 8px; background: var(--line); }
+.session-error { font-size: 12px; color: var(--danger); overflow-wrap: anywhere; }
+/* 完成画像を大きく見る */
+.viewer { position: fixed; inset: 0; z-index: 4; background: rgba(0, 0, 0, 0.92); display: flex; flex-direction: column; }
+.viewer-bar { display: flex; gap: 12px; align-items: center; padding: 8px 16px; color: #ddd; }
+.viewer-bar span { flex: 1; }
+.viewer-bar a, .viewer-bar button { color: #9fd8c2; }
+.viewer img { flex: 1; min-height: 0; width: 100%; object-fit: contain; }

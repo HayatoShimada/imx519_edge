@@ -23,6 +23,7 @@
     <span class="comm-item" id="comm-api" title="85pi の API の応答時間（5 秒ごと）"><i class="dot"></i>API <b>—</b></span>
     <span class="comm-item" id="comm-live" title="ライブビューの受信"><i class="dot"></i>ライブ <b>未接続</b></span>
     <span class="comm-item" id="comm-cms" title="85pi から CMS に届くか（30 秒ごと）"><i class="dot"></i>CMS <b>—</b></span>
+    <span class="comm-item" id="comm-studio" title="85pi からサーバー（完成画像を作る home-linux）に届くか（30 秒ごと）"><i class="dot"></i>サーバー <b>—</b></span>
   </div>
   </header>
 
@@ -156,9 +157,10 @@
       </details>
 
       <section class="panel">
-        <h3>この商品のセッション（85pi に残っているもの）</h3>
-        <ul id="sessions" class="list"></ul>
-        <p id="sessions-empty" class="muted small" hidden>まだありません（サーバーが取り込むと消えます）。</p>
+        <h3>この商品のセッションと完成画像</h3>
+        <ul id="sessions" class="sessions"></ul>
+        <p id="sessions-empty" class="muted small" hidden>まだありません。</p>
+        <p id="sessions-note" class="muted small" hidden></p>
       </section>
     </section>
   </main>
@@ -171,6 +173,15 @@
     </div>
     <ol id="log"></ol>
   </section>
+
+  <div id="viewer" class="viewer" hidden>
+    <div class="viewer-bar">
+      <span id="viewer-title" class="small mono"></span>
+      <a id="viewer-open" class="small" target="_blank" rel="noopener">原寸で開く</a>
+      <button id="viewer-close" type="button" class="link">閉じる</button>
+    </div>
+    <img id="viewer-img" alt="完成画像">
+  </div>
 
   <div id="toast" class="toast" role="status" hidden></div>
   <script src="/static/app.js" type="module"></script>

@@ -20,6 +20,7 @@ from .identity import operator_from, tailscale_whois
 from .manifest import MANIFEST, manifest_digest
 from .pantilt import Presets
 from .service import Busy, EdgeService, NoSpace
+from .studio import Studio, StudioError
 
 STATIC = Path(__file__).parent / "static"
 SESSION_ID = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{6}(_c[0-9]+)?$")
@@ -66,6 +67,7 @@ def create_app(
     presets: Presets | None = None,
     manage_service: bool = False,
     whois=tailscale_whois,
+    studio: Studio | None = None,
 ) -> FastAPI:
     """manage_service が True なら、アプリの起動と終了に合わせてカメラのスレッドを動かす。"""
 
@@ -90,6 +92,8 @@ def create_app(
             raise HTTPException(507, str(e)) from e
         except CmsError as e:
             service.log("error", str(e))
+            raise HTTPException(502, str(e)) from e
+        except StudioError as e:
             raise HTTPException(502, str(e)) from e
         except TimeoutError as e:
             raise HTTPException(504, "カメラが応答しません") from e
@@ -119,7 +123,11 @@ def create_app(
     @app.get("/api/health")
     def health():
         """エッジから先（CMS）に届くか。画面の通信状態に出す。"""
-        return {"cms": cms.health(), "state": service.state}
+        return {
+            "cms": cms.health(),
+            "studio": studio.health() if studio else {"ok": False, "error": "設定がありません"},
+            "state": service.state,
+        }
 
     @app.get("/api/logs")
     def logs():
@@ -247,6 +255,33 @@ def create_app(
         )
         service.log("info", f"CMS に保留の下書きを作りました: #{product['id']} {product['title']}")
         return product
+
+    # --- サーバー（完成画像と処理の進み具合を中継する） ---
+
+    def need_studio() -> Studio:
+        if not studio:
+            raise HTTPException(503, "サーバーの設定がありません")
+        return studio
+
+    @app.get("/api/studio/sessions")
+    def studio_sessions(cms_id: int | None = None):
+        params = {"cms_id": cms_id} if cms_id is not None else None
+        return guard(need_studio().json, "/api/sessions", params=params)
+
+    @app.get("/api/studio/sessions/{session_id}/{name}")
+    def studio_image(session_id: str, name: str):
+        if not SESSION_ID.match(session_id) or name not in ("preview.jpg", "final.jpg"):
+            raise HTTPException(404, "ありません")
+        data = guard(need_studio().image, f"/api/sessions/{session_id}/{name}")
+        return Response(data, media_type="image/jpeg", headers={"Cache-Control": "max-age=60"})
+
+    @app.post("/api/studio/sessions/{session_id}/reprocess")
+    def studio_reprocess(session_id: str):
+        if not SESSION_ID.match(session_id):
+            raise HTTPException(404, "ありません")
+        result = guard(need_studio().json, f"/api/sessions/{session_id}/reprocess", method="POST")
+        service.log("info", f"処理をやり直します: {session_id}")
+        return result
 
     # --- 撮影ジョブ ---
 

@@ -64,12 +64,14 @@ class EdgeService:
         pantilt: PanTilt | None = None,
         free_bytes: Callable[[Path], int] | None = None,
         rng: random.Random | None = None,
+        on_session: Callable[[str], None] | None = None,
     ):
         self.config = config
         self.camera_factory = camera_factory
         self.pantilt = pantilt
         self.free_bytes = free_bytes or (lambda p: shutil.disk_usage(p).free)
         self.rng = rng or random.Random()
+        self.on_session = on_session  # セッションができたときに呼ぶ（サーバーに知らせる）
         self.captures = config.storage.captures_path
         self.captures.mkdir(parents=True, exist_ok=True)
 
@@ -374,6 +376,10 @@ class EdgeService:
             partial.rename(final)
             job.status = "done"
             self.log("info", f"撮影が終わりました: {job.session_id}（{job.done} 枚）")
+            if self.on_session:
+                threading.Thread(
+                    target=self.on_session, args=(job.session_id,), daemon=True
+                ).start()
         except Cancelled:
             shutil.rmtree(partial, ignore_errors=True)
             job.status = "cancelled"
