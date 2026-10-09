@@ -1,0 +1,27 @@
+[project]
+name = "imx519-edge"
+version = "0.1.0"
+description = "Arducam IMX519 の撮影エッジ（Raspberry Pi 5）"
+readme = "README.md"
+# 85pi は Raspberry Pi OS Trixie の Python 3.13。picamera2 / libcamera は apt のものを使う
+requires-python = ">=3.11"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.6",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
