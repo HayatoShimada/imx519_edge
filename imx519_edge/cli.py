@@ -40,9 +40,7 @@ def serve(cfg: config_mod.Config) -> None:
         pantilt,
     )
     cms = Cms(cfg.cms.url, cfg.cms.timeout_s, cfg.cms.cache_s)
-    app = create_app(service, cms, presets)
-    app.add_event_handler("startup", service.start)
-    app.add_event_handler("shutdown", service.stop)
+    app = create_app(service, cms, presets, manage_service=True)
     uvicorn.run(app, host=cfg.server.host, port=cfg.server.port, workers=1)
 
 

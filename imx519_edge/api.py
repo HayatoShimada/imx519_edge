@@ -1,6 +1,7 @@
 """HTTP API と撮影アプリの画面。127.0.0.1 で待ち受け、tailscale serve（tailnet only）で出す。"""
 
 import asyncio
+import contextlib
 import json
 import queue
 import re
@@ -57,8 +58,22 @@ class JobIn(BaseModel):
     lighting: list[dict] | None = None
 
 
-def create_app(service: EdgeService, cms: Cms, presets: Presets | None = None) -> FastAPI:
-    app = FastAPI(title="imx519_edge")
+def create_app(
+    service: EdgeService, cms: Cms, presets: Presets | None = None, manage_service: bool = False
+) -> FastAPI:
+    """manage_service が True なら、アプリの起動と終了に合わせてカメラのスレッドを動かす。"""
+
+    @contextlib.asynccontextmanager
+    async def lifespan(app: FastAPI):
+        if manage_service:
+            service.start()
+        try:
+            yield
+        finally:
+            if manage_service:
+                service.stop()
+
+    app = FastAPI(title="imx519_edge", lifespan=lifespan)
 
     def guard(fn, *args, **kwargs):
         try:
